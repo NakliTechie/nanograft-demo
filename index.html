@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>nanograft — custom LoRA hot-swap on Gemma-2-2B, in your browser</title>
+<meta name="description" content="A custom, developer-trained LoRA adapter running on Gemma-2-2B fully in the browser on WebGPU — with two adapters hot-swapped at runtime on one loaded base. No server." />
+<style>
+  :root { color-scheme: dark; --fg:#e7e7ea; --dim:#9aa; --acc:#7cc4ff; --bad:#ff6b6b; --ok:#59d499; --line:#333; --card:#16171b; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fg);
+         background: #0c0d10; max-width: 880px; margin: 0 auto; padding: 28px 18px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h1 .n { color: var(--acc); }
+  .sub { color: var(--dim); margin: 0 0 18px; font-size: 13px; }
+  p { margin: 10px 0; }
+  a { color: var(--acc); }
+  .lede { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .lede b { color: var(--fg); }
+  .warn { color: var(--dim); font-size: 13px; margin-top: 10px; }
+  .warn b { color: #ffcf6b; }
+  #status { border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; margin: 16px 0;
+            white-space: pre-wrap; background: var(--card); font-size: 13px; }
+  button { font: inherit; padding: 8px 14px; margin: 3px 4px 3px 0; cursor: pointer; color: var(--fg);
+           background: #22242b; border: 1px solid #3a3d47; border-radius: 7px; }
+  button:hover:not(:disabled) { background: #2c2f38; }
+  button:disabled { opacity: 0.38; cursor: default; }
+  button.primary { background: #1d3a52; border-color: #2f6da3; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  select { font: inherit; padding: 6px 8px; background: #22242b; color: var(--fg);
+           border: 1px solid #3a3d47; border-radius: 6px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:5px; border:1px solid var(--line); font-size:12px; color:var(--dim); }
+  .tag.ok { color: var(--ok); border-color: #2c5; }
+  .tag.bad { color: var(--bad); border-color: #a33; }
+  .out { border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin:8px 0; min-height:3em;
+         white-space:pre-wrap; background:#0f1013; }
+  .which { color: var(--dim); font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 14px; font-size: 12px; }
+  th, td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; }
+  th { color: var(--dim); font-weight: normal; }
+  footer { margin-top: 30px; color: var(--dim); font-size: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+  code { background: #1a1b20; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+</style>
+
+<h1><span class="n">nanograft</span> — custom LoRA hot-swap on Gemma-2-2B, in your browser</h1>
+<p class="sub">on-device · WebGPU · no server · the model + your adapters never leave the tab</p>
+
+<div class="lede">
+  <p>This page runs <b>Google's Gemma-2-2B</b> entirely in your browser on <b>WebGPU</b>, then loads
+  <b>custom LoRA adapters</b> — small fine-tuned "personality" patches — and <b>hot-swaps between them
+  at runtime on a single loaded base model</b>, with no page or model reload.</p>
+  <p>As far as we can tell, a public demo that <b>runtime-swaps two custom developer-trained LoRAs on one
+  in-browser Gemma base</b> hasn't been shown before. The pieces exist in isolation (Gemma-on-WebGPU is
+  common; adapter hot-swap is common on servers) — doing the swap <i>on-device in a tab</i> is the new bit.</p>
+  <p class="warn"><b>Heads up:</b> the base model is a <b>~2.4&nbsp;GB</b> download the first time (cached
+  after). Needs a <b>WebGPU</b> browser (recent Chrome/Edge; Safari 18+). Two throwaway style adapters are
+  loaded: <code>pirate</code> and <code>uwu</code> — deliberately silly so the swap is obvious.</p>
+</div>
+
+<div id="status">checking WebGPU…</div>
+
+<div class="row">
+  <button id="load" class="primary" disabled>1 · Load Gemma-2-2B (~2.4 GB)</button>
+  <button id="enable" disabled>2 · Enable adapters</button>
+  <span id="webgpu"></span>
+</div>
+
+<div class="row">
+  <label>Prompt: <select id="prompt"></select></label>
+</div>
+
+<div class="row">
+  <button id="run-base" disabled>Run BASE (plain Gemma)</button>
+  <button id="run-a" disabled>Run 🏴‍☠️ pirate</button>
+  <button id="run-b" disabled>Run 🐾 uwu</button>
+  <button id="run-swap" class="primary" disabled>▶ Runtime SWAP: base → pirate → uwu → pirate</button>
+</div>
+
+<div class="which" id="which"></div>
+<div id="out" class="out"></div>
+
+<table id="results">
+  <thead><tr><th>#</th><th>mode</th><th>gen tok</th><th>ms</th><th>tok/s</th><th>output (first 90 chars)</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<footer>
+  One base in VRAM · adapters swapped in at ~tens of ms · greedy decode (deterministic).
+  Runtime: <a href="https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference/web_js" target="_blank" rel="noopener">MediaPipe LLM Inference (Web)</a>.
+  Model weights hosted on <a id="hflink" target="_blank" rel="noopener">Hugging Face</a>; page served from Cloudflare.
+  <span id="buildtag"></span>
+</footer>
+
+<script type="module" src="./main.js"></script>
